@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://storage.googleapis.com/assets.meld.cx/agent/1.0.42/Agent.js"></script>
+    <style>
+        body {
+            text-align: center;
+            font-family: sans-serif;
+        }
+
+        h1, h2 {
+            margin-top: 100px;
+        }
+
+        button {
+            margin-top: 5px;
+            width: 280px;
+            height: 100px;
+        }
+
+        pre {
+            text-align: left;
+            font-size: 10px;
+            display: table;
+            margin-top: 40px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        select {
+            height: 60px;
+            padding: 20px;
+            margin: 30px;
+            width: 200px;
+            display: inline-block;
+        }
+
+        .label {
+            width: 200px;
+            display: inline-block;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            padding-top: 100px;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgb(0,0,0);
+            background-color: rgba(0,0,0,0.4);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 50%;
+        }
+
+        .modal-close {
+            color: #aaaaaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .modal-close:hover,
+        .modal-close:focus {
+            color: #000;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+    </style>
+    <title>Cheque Scanner Demo</title>
+</head>
+
+<body>
+    <h1>Cheque Scanner Demo</h1>
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <div id="params"></div>
+            <button id="ok">OK</button>
+        </div>
+    </div>
+    <button id="demo">ONE-CLICK DEMO</button>
+    <hr/>
+    <button id="open">OPEN DEVICE</button>
+    <button id="close">CLOSE DEVICE</button>
+    <button id="status">GET STATUS</button>
+    <button id="led">CONTROL LED</button>
+    <button id="deskew">SET DESKEW</button>
+    <button id="scan">PERFORM SCAN</button>
+    <button id="wait">WAIT FOR SCAN</button>
+    <button id="cancel">CANCEL SCAN</button>
+    <button id="orientation">GET ORIENTATION</button>
+    <button id="lastDoc">GET LAST DOC</button>
+    <button id="micr">GET MICR</button>
+    <button id="scheme">GET MICR SCHEME</button>
+    <button id="font">GET MICR FONT</button>
+    <button id="rewind">REWIND</button>
+    <button id="fwdAndStamp">FORWARD & STAMP</button>
+    <button id="eject">EJECT DOCUMENT</button>
+    <button id="fastEject">FAST REAR EJECT</button>
+    <button id="stampAndEject">STAMP & EJECT</button>
+    <button id="debug">DEBUG MODE</button>
+    
+    <pre id="result">Initialising...</pre>
+    <img id="preview" src=""/>
+
+    <script>
+
+        const modal = document.getElementById('modal');
+        let modalCallback = null;
+
+        const openModal = collectResult => {
+            return new Promise((resolve, reject) => {
+                modalCallback = async(result) => {
+                    if (result) {
+                        const res = await collectResult();
+                        resolve(res);
+                    } else {
+                        reject(new Error('The operation was cancelled by user'));
+                    }
+                };
+                modal.style.display = 'block';
+            });
+        };
+
+        const closeModal = result => {
+            modal.style.display = 'none';
+            
+            if (modalCallback) {
+                modalCallback(result);
+            }
+        };
+
+        
+        const ok = document.getElementById('ok');
+        ok.onclick = () => closeModal(true);
+
+        const [close] = document.getElementsByClassName('modal-close');
+        close.onclick = () => closeModal(false);
+
+        window.onclick = event => {
+            if (event.target === modal) {
+                closeModal(false);
+            }
+        };
+
+        const params = document.getElementById('params');
+        const previewImage = document.getElementById('preview');
+        const resultData = document.getElementById('result');
+
+        const demoButton = document.getElementById('demo');
+        const openButton = document.getElementById('open');
+        const closeButton = document.getElementById('close');
+        const statusButton = document.getElementById('status');
+        const ledButton = document.getElementById('led');
+        const deskewButton = document.getElementById('deskew');
+        const scanButton = document.getElementById('scan');
+        const waitButton = document.getElementById('wait');
+        const cancelButton = document.getElementById('cancel');
+        const orientationButton = document.getElementById('orientation');
+        const lastDocButton = document.getElementById('lastDoc');
+        const micrButton = document.getElementById('micr');
+        const schemeButton = document.getElementById('scheme');
+        const fontButton = document.getElementById('font');
+        const rewindButton = document.getElementById('rewind');
+        const fwdAndStampButton = document.getElementById('fwdAndStamp');
+        const ejectButton = document.getElementById('eject');
+        const fastEjectButton = document.getElementById('fastEject');
+        const stampAndEjectButton = document.getElementById('stampAndEject');
+        const debugButton = document.getElementById('debug');
+
+        const agent = window.Agent;
+        const handlers = {};
+
+        const sleep = timeout => new Promise(resolve => setTimeout(resolve, timeout));
+
+        const showMessage = (...messages) => {
+            let result = '';
+            for (let message of messages) {
+                if (typeof message !== 'string') {
+                    message = JSON.stringify(message, null, 2);
+                }
+                result += message + '\n';
+            }
+
+            resultData.innerHTML = result;
+            console.log(result);
+        }
+
+        const demo = async() => {
+            let result = await agent.Peripherals.Pertech.ChequeScanner.openDevice();
+            if (result.resultCode) {
+                showMessage(
+                    'Check that Cheque Scanner is connected and not opened in another app',
+                    'ChequeScanner.openDevice() result:',
+                    result
+                );
+
+                return;
+            }
+
+            try {
+                const color = 0; // Grayscale
+                const dpi = 200; // DPI 200
+                const scanType = 0; // Paper
+                const waitTime = 30; // In 1/10th seconds
+
+                result = await agent.Peripherals.Pertech.ChequeScanner.performScan(color, dpi, scanType, waitTime);
+                if (result.resultCode) {
+                    showMessage(
+                        'Scan unsuccessful, check that the document is correctly positioned for scanning',
+                        'ChequeScanner.performScan() result:',
+                        result
+                    );
+
+                    return;
+                }
+
+                const format = 7; // Grayscale JPEG
+                const docSide = 3; // Front & Back
+                const rotation = 1; // Counter Clockwise
+
+                result = await agent.Peripherals.Pertech.ChequeScanner.getLastDocument(format, docSide, rotation);
+                if (result.resultCode) {
+                    showMessage(
+                        'Scan unsuccessful, check that the document is correctly positioned for scanning',
+                        'ChequeScanner.getLastDocument() result:',
+                        result
+                    );
+
+                    return;
+                }
+
+                const base64Image = result.result;
+                if (base64Image) {
+                    previewImage.src = `data:${base64Image.mime};${base64Image.format},${base64Image.data}`;
+                } else {
+                    showMessage(
+                        'Scan unsuccessful, check that the document is correctly positioned for scanning',
+                        'ChequeScanner.getLastDocument() result:',
+                        result
+                    );
+
+                    return;
+                }
+
+                const scheme = 0; // Automatic
+                const font = 0; // Automatic
+
+                result = await agent.Peripherals.Pertech.ChequeScanner.getLastMICR(scheme, font);
+
+                showMessage(
+                    'Scan successful, please see the image below',
+                    'ChequeScanner.lastMICRResult() result:',
+                    result
+                );
+                
+                const direction = 0; // Rear
+                await agent.Peripherals.Pertech.ChequeScanner.ejectDocument(direction);
+
+            } finally {
+                await agent.Peripherals.Pertech.ChequeScanner.closeDevice();
+            }
+        };
+        
+        const openDevice = async() => {
+            const result = await agent.Peripherals.Pertech.ChequeScanner.openDevice();
+            showMessage(result);
+        };
+
+        const closeDevice = async() => {
+            const result = await agent.Peripherals.Pertech.ChequeScanner.closeDevice();
+            showMessage(result);
+        };
+
+        const getStatus = async() => {
+            const result = await agent.Peripherals.Pertech.ChequeScanner.getStatus();
+            showMessage(result);
+        };
+
+        const controlLEDBlink = async(title) => {
+            params.innerHTML = `
+            <p>${title}</p>
+            <div>
+                <span class="label">Color:</span>
+                <select id="pcolor">
+                    <option value="0">Green</option>
+                    <option value="1">Red</option>
+                    <option value="2">Yellow</option>
+                </select>
+            </div>
+            <div>
+                <span class="label">Blink:</span>
+                <select id="pblink">
+                    <option value="0">No Blink</option>
+                    <option value="1">Slow Blink</option>
+                    <option value="2">Fast Blink</option>
+                </select>
+            </div>`;
+
+            const {color, blinkOptions} = await openModal(() => {
+                const pcolor = document.getElementById('pcolor');
+                const pblink = document.getElementById('pblink');
+
+                return {
+                    color: parseInt(pcolor.value, 10), 
+                    blinkOptions: parseInt(pblink.value, 10)
+                };
+            });
+
+            const result = await agent.Peripherals.Pertech.ChequeScanner.controlLEDBlink(color, blinkOptions);
+            showMessage(result);
+        };
+
+        const setDeskew = async(title) => {
+            params.innerHTML = `
+            <p>${title}</p>
+            <div>
+                <span class="label">Auto-deskew:</span>
+                <select id="pdeskew">
+                    <option value="0">Off</option>
+                    <option value="1">On</option>
+                </select>
+            </div>`;
+
+            const {autoDeskew} = await openModal(() => {
+                const pdeskew = document.getElementById('pdeskew');
+
+                return {
+                    autoDeskew: parseInt(pdeskew.value, 10)
+                };
+            });
+
+            const result = await agent.Peripherals.Pertech.ChequeScanner.setDeskew(autoDeskew);
+            showMessage(result);
+        };
+
+        const performScan = async(title) => {
+            params.innerHTML = `
+            <p>${title}</p>
+            <div>
+                <span class="label">Color:</span>
+                <select id="pcolor">
+                    <option value="0">Grayscale</option>
+                    <option value="1">Color</option>
+                    <option value="2">UV</option>
+                    <option value="3">IR</option>
+                    <option value="4">WaterMark</option>
+                    <option value="6">UV WM Grayscale</option>
+                </select>
+            </div>
+            <div>
+                <span class="label">DPI:</span>
+                <select id="pdpi">
+                    <option value="200">200</option>
+                    <option value="300">300</option>
+                    <option value="400">400</option>
+                    <option value="600">600</option>
+                </select>
+            </div>
+            <div>
+                <span class="label">Scan Type:</span>
+                <select id="ptype">
+                    <option value="0">Paper</option>
+                    <option value="1">Card</option>
+                </select>
+            </div>
+            <div>
+                <span class="label">Wait Time (in 1/10th seconds):</span>
+                <select id="ptime">
+                    <option value="10">10</option>
+                    <option value="30" selected="selected">30</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="300">300</option>
+                </select>
+            </div>`;
+
+            const {color, dpi, scanType, waitTime} = await openModal(() => {
+                const pcolor = document.getElementById('pcolor');
+                const pdpi = document.getElementById('pdpi');
+                const ptype = document.getElementById('ptype');
+                const ptime = document.getElementById('ptime');
+
+                return {
+                    color: parseInt(pcolor.value, 10), 
+                    dpi: parseInt(pdpi.value, 10),
+                    scanType: parseInt(ptype.value, 10), 
+                    waitTime: parseInt(ptime.value, 10)
+                };
+            });
+
+            const result = await agent.Peripherals.Pertech.ChequeScanner.performScan(color, dpi, scanType, waitTime);
+            showMessage(result);
+        };
+
+        const waitForScanComplete = async() => {
+            const result = await agent.Peripherals.Pertech.ChequeScanner.waitForScanComplete();
+            showMessage(result);
+        };
+
+        const cancelScanWait = async() => {
+            const result = await agent.Peripherals.Pertech.ChequeScanner.cancelScanWait();
+            showMessage(result);
+        };
+
+        const getOrientation = async(title) => {
+            params.innerHTML = `
+            <p>${title}</p>
+            <div>
+                <span class="label">Mode:</span>
+                <select id="pmode">
+                    <option value="0">Use Magnetic</option>
+                    <option value="1">Use OCR</option>
+                </select>
+            </div>`;
+
+            const {mode} = await openModal(() => {
+                const pmode = document.getElementById('pmode');
+
+                return {
+                    mode: parseInt(pmode.value, 10)
+                };
+            });
+
+            const result = await agent.Peripherals.Pertech.ChequeScanner.getOrientation(mode);
+            showMessage(result);
+        };
+
+        const getLastDocument = async(title) => {
+            params.innerHTML = `
+            <p>${title}</p>
+            <div>
+                <span class="label">Format:</span>
+                <select id="pformat">
+                    <option value="0">G4 TIFF</option>
+                    <option value="1">Grayscale TIFF</option>
+                    <option value="2">Color TIFF</option>
+                    <option value="7" selected="selected">Grayscale JPEG</option>
+                    <option value="8">Color JPEG</option>
+                    <option value="9">Black & White JPEG</option>
+                    <option value="10">Grayscale BMP</option>
+                    <option value="11">Color BMP</option>
+                    <option value="12">UV JPG</option>
+                    <option value="14">WaterMark JPG</option>
+                </select>
+            </div>
+            <div>
+                <span class="label">Document Side:</span>
+                <select id="pside">
+                    <option value="1">Front</option>
+                    <option value="2">Back</option>
+                    <option value="3" selected="selected">Front & Back</option>
+                </select>
+            </div>
+            <div>
+                <span class="label">Rotation:</span>
+                <select id="protation">
+                    <option value="0">None</option>
+                    <option value="1" selected="selected">Counter Clockwise</option>
+                    <option value="2">Clockwise</option>
+                </select>
+            </div>`;
+
+            const {format, docSide, rotation} = await openModal(() => {
+                const pformat = document.getElementById('pformat');
+                const pside = document.getElementById('pside');
+                const protation = document.getElementById('protation');
+
+                return {
+                    format: parseInt(pformat.value, 10),
+                    docSide: parseInt(pside.value, 10),
+                    rotation: parseInt(protation.value, 10)
+                };
+            });
+
+            const result = await agent.Peripherals.Pertech.ChequeScanner.getLastDocument(format, docSide, rotation);
+            showMessage(result);
+
+            const base64Image = result.result;
+            if (base64Image) {
+                previewImage.src = `data:${base64Image.mime};${base64Image.format},${base64Image.data}`;
+            }
+        };
+
+        const getLastMICR = async(title) => {
+            params.innerHTML = `
+            <p>${title}</p>
+            <div>
+                <span class="label">Scheme:</span>
+                <select id="pscheme">
+                    <option value="0">Automatic</option>
+                    <option value="1">Magnetic</option>
+                    <option value="2">OCR only</option>
+                </select>
+            </div>
+            <div>
+                <span class="label">Font:</span>
+                <select id="pfont">
+                    <option value="0">Automatic</option>
+                    <option value="1">E13B</option>
+                    <option value="2">CMC-7</option>
+                </select>
+            </div>`;
+
+            const {scheme, font} = await openModal(() => {
+                const pscheme = document.getElementById('pscheme');
+                const pfont = document.getElementById('pfont');
+
+                return {
+                    scheme: parseInt(pscheme.value, 10),
+                    font: parseInt(pfont.value, 10)
+                };
+            });
+
+            const result = await agent.Peripherals.Pertech.ChequeScanner.getLastMICR(scheme, font);
+            showMessage(result);
+        };
+
+        const getPropLastMICRDecodeScheme = async() => {
+            const result = await agent.Peripherals.Pertech.ChequeScanner.getPropLastMICRDecodeScheme();
+            showMessage(result);
+        };
+
+        const getPropLastMICRDecodeFont = async() => {
+            const result = await agent.Peripherals.Pertech.ChequeScanner.getPropLastMICRDecodeFont();
+            showMessage(result);
+        };
+
+        const rewind = async() => {
+            const result = await agent.Peripherals.Pertech.ChequeScanner.rewind();
+            showMessage(result);
+        };
+
+        const fwdFeedAndStamp = async(title) => {
+            params.innerHTML = `
+            <p>${title}</p>
+            <div>
+                <span class="label">Stamp Position (each value is 1/200 of a inch):</span>
+                <select id="pposition">
+                    <option value="520">520</option>
+                    <option value="620">620</option>
+                    <option value="720" selected="selected">720</option>
+                </select>
+            </div>`;
+
+            const {stampPosition} = await openModal(() => {
+                const pposition = document.getElementById('pposition');
+
+                return {
+                    stampPosition: parseInt(pposition.value, 10)
+                };
+            });
+
+            const result = await agent.Peripherals.Pertech.ChequeScanner.fwdFeedAndStamp(stampPosition);
+            showMessage(result);
+        };
+
+        const ejectDocument = async(title) => {
+            params.innerHTML = `
+            <p>${title}</p>
+            <div>
+                <span class="label">Direction:</span>
+                <select id="pdirection">
+                    <option value="0">Rear</option>
+                    <option value="1">Front</option>
+                </select>
+            </div>`;
+
+            const {direction} = await openModal(() => {
+                const pdirection = document.getElementById('pdirection');
+
+                return {
+                    direction: parseInt(pdirection.value, 10)
+                };
+            });
+
+            const result = await agent.Peripherals.Pertech.ChequeScanner.ejectDocument(direction);
+            showMessage(result);
+        };
+
+        const acceleratedRearEject = async() => {
+            const result = await agent.Peripherals.Pertech.ChequeScanner.acceleratedRearEject();
+            showMessage(result);
+        };
+
+        const stampAndEject = async(title) => {
+            params.innerHTML = `
+            <p>${title}</p>
+            <div>
+                <span class="label">Stamp Position (each value is 1/200 of a inch):</span>
+                <select id="pposition">
+                    <option value="520">520</option>
+                    <option value="620">620</option>
+                    <option value="720">720</option>
+                </select>
+            </div>
+            <div>
+                <span class="label">Direction:</span>
+                <select id="pdirection">
+                    <option value="0">Rear</option>
+                    <option value="1">Front</option>
+                </select>
+            </div>`;
+
+            const {stampPosition, direction} = await openModal(() => {
+                const pposition = document.getElementById('pposition');
+                const pdirection = document.getElementById('pdirection');
+
+                return {
+                    stampPosition: parseInt(pposition.value, 10),
+                    direction: parseInt(pdirection.value, 10)
+                };
+            });
+
+            const result = await agent.Peripherals.Pertech.ChequeScanner.stampAndEject(stampPosition, direction);
+            showMessage(result);
+        };
+
+        const setDebugMode = async(title) => {
+            params.innerHTML = `
+            <p>${title}</p>
+            <div>
+                <span class="label">Debug Mode:</span>
+                <select id="pmode">
+                    <option value="0">Off</option>
+                    <option value="1">On</option>
+                </select>
+            </div>`;
+
+            const {debugMode} = await openModal(() => {
+                const pmode = document.getElementById('pmode');
+
+                return {
+                    debugMode: parseInt(pmode.value, 10)
+                };
+            });
+
+            const result = await agent.Peripherals.Pertech.ChequeScanner.setDebugMode(debugMode);
+            showMessage(result);
+        };
+
+
+        const initialise = async() => {
+            try {
+                await agent.onReadyAsync();
+
+                console.log('INITIALISE - START');
+
+                if (!agent.Peripherals ||
+                    !agent.Peripherals.Pertech ||
+                    !agent.Peripherals.Pertech.ChequeScanner) {
+                    showMessage('Cheque Scanner API is not supported');
+
+                    return;
+                }
+
+                const buttons = [
+                    {button: demoButton, handler: demo},
+                    {button: openButton, handler: openDevice},
+                    {button: closeButton, handler: closeDevice},
+                    {button: statusButton, handler: getStatus},
+                    {button: ledButton, handler: controlLEDBlink},
+                    {button: deskewButton, handler: setDeskew},
+                    {button: scanButton, handler: performScan},
+                    {button: waitButton, handler: waitForScanComplete},
+                    {button: cancelButton, handler: cancelScanWait},
+                    {button: orientationButton, handler: getOrientation},
+                    {button: lastDocButton, handler: getLastDocument},
+                    {button: micrButton, handler: getLastMICR},
+                    {button: schemeButton, handler: getPropLastMICRDecodeScheme},
+                    {button: fontButton, handler: getPropLastMICRDecodeFont},
+                    {button: rewindButton, handler: rewind},
+                    {button: fwdAndStampButton, handler: fwdFeedAndStamp},
+                    {button: ejectButton, handler: ejectDocument},
+                    {button: fastEjectButton, handler: acceleratedRearEject},
+                    {button: stampAndEjectButton, handler: stampAndEject},
+                    {button: debugButton, handler: setDebugMode}
+                ];
+
+                buttons.forEach(b => {
+                    b.title = b.button.innerText;
+                    b.button.onclick = async() => {
+                        try {
+                            console.log(`${b.title} - START`);
+                            previewImage.src = '';
+                            resultData.innerHTML = '';
+                            b.button.innerText = `WAITING FOR "${b.title}"...`;
+                            buttons.forEach(b => b.button.disabled = true);
+
+                            await b.handler(b.title);
+                        } catch (ex) {
+                            showMessage(ex.toString());
+                        } finally {
+                            b.button.innerText = b.title;
+                            buttons.forEach(b => b.button.disabled = false);
+                            console.log(`${b.title} - END`);
+                        }
+                    };
+                });
+
+                showMessage('Initialisation completed, waiting for commands...');
+
+            } catch (ex) {
+                showMessage(ex.toString());
+            } finally {
+                console.log('INITIALISE - END');
+            }
+        };
+
+        initialise();
+
+    </script>
+</body>
+
+</html>
